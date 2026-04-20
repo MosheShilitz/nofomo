@@ -13,31 +13,28 @@ export interface SignalParams {
 }
 
 export function calcSignalScore(p: SignalParams): number {
-  // רכיב 1: כמות מקורות (max 25)
-  const sourcePts = Math.min(p.sourceCount * 5, 25)
+  // בסיס: כל ידיעה שעברה ניתוח Claude מקבלת 15 נקודות
+  const basePts = 15
 
-  // רכיב 2: Tier-1 bonus (max 10)
-  const tier1Pts = p.isFirstTier1 ? 10 : 0
+  // רכיב 1: Impact score מ-Claude (max 45) — המדד הכי אמין שיש לנו
+  const impactPts = (p.impactScore - 1) * 11.25  // 1→0, 2→11, 3→22, 4→34, 5→45
 
-  // רכיב 3: Social engagement (max 20) — log scale
-  const socialPts = Math.min(Math.log10(Math.max(p.socialScore, 1)) * 8, 20)
+  // רכיב 2: כמות מקורות (max 15)
+  const sourcePts = Math.min((p.sourceCount - 1) * 7.5, 15)
 
-  // רכיב 4: Expert reactions (max 20)
-  const expertPts = Math.min(p.expertReactions * 5, 20)
+  // רכיב 3: Tier-1 bonus (max 15)
+  const tier1Pts = p.isFirstTier1 ? 15 : 0
 
-  // רכיב 5: Velocity (max 15) — ככל שמהיר יותר, ציון גבוה יותר
-  const velocityPts = p.velocityMinutes < 30
-    ? 15
-    : p.velocityMinutes < 120
-    ? 10
-    : p.velocityMinutes < 360
-    ? 5
-    : 0
+  // רכיב 4: Social engagement (max 10) — log scale
+  const socialPts = Math.min(Math.log10(Math.max(p.socialScore, 1)) * 4, 10)
 
-  // רכיב 6: Impact score מ-Claude (max 10)
-  const impactPts = (p.impactScore - 1) * 2.5
+  // רכיב 5: Expert reactions (max 10)
+  const expertPts = Math.min(p.expertReactions * 2.5, 10)
 
-  const total = sourcePts + tier1Pts + socialPts + expertPts + velocityPts + impactPts
+  // רכיב 6: Velocity (max 5)
+  const velocityPts = p.velocityMinutes < 60 ? 5 : p.velocityMinutes < 240 ? 3 : 0
+
+  const total = basePts + impactPts + sourcePts + tier1Pts + socialPts + expertPts + velocityPts
   return Math.round(Math.min(total, 100))
 }
 

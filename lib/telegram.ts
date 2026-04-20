@@ -59,40 +59,43 @@ export async function sendApprovalMessage(article: {
   }
   const stars = starsMap[article.impact_score] ?? "⭐"
 
-  const who = article.who_affected.join(" • ")
-  const uses = article.use_cases.map((u) => `  🔧 ${u}`).join("\n")
-  const crossRef = article.cross_refs_count > 0
-    ? `🔍 ${article.cross_refs_count} מקורות כיסו זאת${article.first_source ? ` | 🥇 ${article.first_source}` : ""}`
-    : `📡 מקור: ${article.source_display_name}`
+  const who = article.who_affected.join(" · ")
+  const uses = article.use_cases.map((u) => `› ${u}`).join("\n")
 
-  const bottomLine = article.bottom_line ? `\n💬 <i>"${article.bottom_line}"</i>\n` : ""
-  const preprintWarning = article.is_preprint ? `\n⚠️ <b>Preprint</b> — טרם עבר ביקורת עמיתים\n` : ""
+  const sourceLine = article.cross_refs_count > 0
+    ? `🔍 ${article.cross_refs_count} מקורות${article.first_source ? ` · 🥇 ${article.first_source}` : ""}`
+    : `📡 ${article.source_display_name}`
+
+  const bottomLine = article.bottom_line
+    ? `\n<blockquote>${article.bottom_line}</blockquote>\n`
+    : ""
+
+  const preprintWarning = article.is_preprint
+    ? `\n⚠️ <b>Preprint</b> — טרם עבר ביקורת עמיתים\n`
+    : ""
 
   const problemSection = article.the_problem
-    ? `\n🔍 הבעיה שפתרו:\n${article.the_problem}\n`
-    : ""
-  const solutionSection = article.the_solution
-    ? `\n⚙️ הפתרון:\n${article.the_solution}\n`
+    ? `\n<b>הבעיה שפתרו</b>\n${article.the_problem}\n`
     : ""
 
-  const text = `━━━━━━━━━━━━━━━━━━━━━━━━━━
-🆕 לאישור  |  ${signalEmoji} Signal: ${article.signal_score}/100
+  const solutionSection = article.the_solution
+    ? `\n<b>הפתרון</b>\n${article.the_solution}\n`
+    : ""
+
+  const text = `${signalEmoji} <b>${article.signal_score}/100</b>  ·  ${stars} ${article.impact_score}/5  ·  🆕 לאישור
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
-📌 <b>${article.title_he}</b>
+<b>${article.title_he}</b>
 ${bottomLine}${preprintWarning}
-📣 מה קרה:
+<b>מה קרה</b>
 ${article.what_happened}
 ${problemSection}${solutionSection}
-💡 למה זה חשוב:
+<b>למה זה חשוב</b>
 ${article.why_matters}
 
-👥 משפיע על: ${who}
+👥 ${who}
 ${uses}
 
-${stars} פריצת דרך: ${article.impact_score}/5
-${crossRef}
-
-🔗 ${article.original_url}`
+${sourceLine}  ·  <a href="${article.original_url}">🔗 מקור</a>`
 
   // כפתורי inline
   const reply_markup = {
