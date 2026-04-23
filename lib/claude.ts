@@ -2,88 +2,141 @@ import Anthropic from "@anthropic-ai/sdk"
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-export interface AnalysisResult {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface BatchResult {
+  url: string
+  original_title: string
+  signal_score: number
+  merged_urls?: string[]
+}
+
+export interface StoryDetails {
   title_he: string
-  bottom_line: string          // שורת תקציר — משפט אחד שובה לב
-  what_happened: string        // משפט אחד עובדתי
-  why_matters: string          // זווית מפתיעה
-  the_problem: string | null   // הבעיה שפתרו (null בידיעות חדשותיות פשוטות)
-  the_solution: string | null  // הפתרון בשפה פשוטה (null בידיעות חדשותיות פשוטות)
-  summary_he: string           // 200-350 מילה, מבנה מלא
+  bottom_line: string
+  what_happened: string
+  why_matters: string
+  the_problem: string | null
+  the_solution: string | null
+  summary_he: string
   who_affected: string[]
   use_cases: string[]
   impact_score: 1 | 2 | 3 | 4 | 5
   category: string
 }
 
-export async function analyzeArticle(
+// Backwards compat
+export type AnalysisResult = StoryDetails
+
+function parseJSON<T>(text: string): T {
+  const clean = text.replace(/^```(?:json)?\n?/m, "").replace(/\n?```$/m, "").trim()
+  return JSON.parse(clean) as T
+}
+
+// ─── Stage 1: Batch Triage ────────────────────────────────────────────────────
+// שולח batch של ידיעות, מקבל חזרה Top 5 עם signal score בלבד
+// קריאה אחת מהירה — ללא תרגום, ללא עברית
+
+export async function analyzeBatch(
+  articles: Array<{ url: string; title: string; content: string; source_name: string }>
+): Promise<BatchResult[]> {
+  const articlesText = articles
+    .map(
+      (a, i) =>
+        `[${i + 1}] SOURCE: ${a.source_name}\nURL: ${a.url}\nTITLE: ${a.title}\nCONTENT: ${a.content.slice(0, 600)}`
+    )
+    .join("\n\n---\n\n")
+
+  const message = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 800,
+    system: `You are the Senior Tech Editor for NO-FOMO.AI. Your ONLY job right now is TRIAGE.
+
+ANTI-HYPE SIGNAL SCORING RUBRIC (0-100):
+Base score: 50
++30: Open-source/open-weights model release, new SOTA research with benchmarks, new developer APIs/tools
++20: Direct measurable developer impact (API price cuts, major regulatory shifts, real technical breakthroughs)
+-50 PENALTY: PR buzzwords ("Revolutionary," "Game-changer," "groundbreaking," "The future of AI")
+-30 PENALTY: Unverified rumors, generic opinion pieces, incremental minor updates, marketing fluff
+
+DEDUPLICATION: If multiple items cover the SAME event, merge into ONE entry. Use the most authoritative URL (official blog > research > media > newsletter).
+
+Return ONLY a valid JSON array of the TOP 5 items by signal_score. No explanations. No markdown fences.`,
+    messages: [
+      {
+        role: "user",
+        content: `Process this batch. Return top 5 as JSON array only:\n\n${articlesText}\n\nFormat: [{"url":"...","original_title":"...","signal_score":75,"merged_urls":["other url if merged"]}]`,
+      },
+    ],
+  })
+
+  const text = message.content[0].type === "text" ? message.content[0].text : "[]"
+  return parseJSON<BatchResult[]>(text)
+}
+
+// ─── Stage 2: Detail Extraction ───────────────────────────────────────────────
+// רץ על כל אחת מ-5 הידיעות הנבחרות — מחלץ תוכן מלא בעברית
+
+export async function extractStoryDetails(
   title: string,
   content: string,
-  url: string
-): Promise<AnalysisResult> {
+  url: string,
+  mergedContent?: string
+): Promise<StoryDetails> {
+  const fullContent = mergedContent
+    ? `מקור ראשי:\n${content}\n\nהקשר נוסף ממקורות נוספים:\n${mergedContent}`
+    : content
+
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
     max_tokens: 2048,
-    system: `אתה עורך ראשי של NO-FOMO.AI — פלטפורמת ידיעות AI עברית. הסגנון שלנו: חכם, נגיש, ישיר. כותבים לאנשים שעוקבים אחרי AI אבל לא בהכרח חוקרים.
+    system: `אתה עורך טכני בכיר של NO-FOMO.AI. כותב לקהל של מפתחים ואנשי AI מקצועיים.
 
-**הכלל הכי חשוב:** כל ידיעה מתחילה בשורת "השורה התחתונה" — משפט אחד שובה לב שמסכם את הכל. כמו כותרת עיתון טובה, לא כמו אבסטרקט אקדמי.
+חוק ברזל — Anti-Hype:
+אסור להשתמש ב: "מהפכני", "פורץ דרך", "עתיד ה-AI", "גיים צ'יינג'ר", "שינוי פרדיגמה", או כל מקבילה עברית.
+שפה: טכנית, עובדתית, ישירה. משפטים קצרים. אין שיווק.
 
-**עקרונות כתיבה:**
-- דבר לאנשים, לא לרובוטים
-- השתמש במשלים ודימויים כשזה עוזר להבנה
-- הסבר "למה זה חשוב לי?" לא רק "מה קרה"
-- שפה יומיומית, לא ז'רגון — אם חייב מונח טכני, הסבר אותו במשפט
-- להיות מפתיע ולא צפוי — מצא את הזווית המעניינת
+מבנה summary_he לפי סוג ידיעה:
 
-**summary_he — מבנה לפי סוג הידיעה:**
+מחקר / מודל חדש:
+1. שורת התקציר — מה זה עושה בפועל
+2. הבעיה שפתרו — מה לא עבד לפני
+3. הפתרון הטכני — איך זה עובד
+4. למה זה חשוב — השלכה מדידה
+5. מה זה אומר למפתח
 
-🔬 **מחקר / פריצת דרך טכנית** (מאמר, מודל חדש, שיטה חדשה):
-1. שורת התקציר — משפט אחד שובה לב
-2. מה בעצם קרה — עם הקשר
-3. הבעיה שפתרו — מה היה שבור לפני? עם משל אם אפשר
-4. הפתרון — איך זה עובד, בשפה פשוטה
-5. למה זה מעניין — הזווית שרוב יפספסו
-6. מה זה אומר עליך — שורה מעשית אחת
-
-📣 **ידיעה / השקה / עדכון / עסקה / טיפ** (כל השאר):
+הכרזה / עדכון / כלי חדש:
 1. שורת התקציר
-2. מה קרה — בשפה פשוטה עם הקשר
-3. למה זה חשוב — הזווית המפתיעה
-4. מה זה אומר עליך — שורה מעשית אחת
+2. מה בדיוק השתנה — מספרים וכלים, לא תיאורים כלליים
+3. למה זה רלוונטי — השלכה מעשית
+4. מה עושים עם זה עכשיו
 
-**חשוב:** the_problem ו-the_solution — השתמש בהם רק עבור מחקר אקדמי או המצאה טכנית אמיתית. לא לטיפים, עדכוני גרסה, הכרזות מוצר, עסקאות.
-
-**impact_score:**
-- 1 = עדכון שגרתי / שיפור קטן
-- 2 = חדשות, שווה לדעת
-- 3 = חשוב, משפיע על התחום
-- 4 = מאוד חשוב, שינוי משמעותי
-- 5 = פריצת דרך היסטורית (תן 5 רק לדברים שבאמת ישנו הכל)
-
-**who_affected:** developers, business, consumers, researchers, policymakers
-**category:** LLMs, tools, research, robotics, safety, policy, vision, audio, agents, open_source, business, hardware
+the_problem ו-the_solution: רק למחקר אקדמי או חידוש טכני אמיתי. null לכל השאר.
+impact_score: 1=שגרתי, 2=שווה לדעת, 3=חשוב, 4=מאוד חשוב, 5=שינוי אמיתי (נדיר מאוד)
+who_affected: רק מתוך [developers, business, consumers, researchers, policymakers]
+category: רק מתוך [LLMs, tools, research, robotics, safety, policy, vision, audio, agents, open_source, business, hardware]
 
 החזר JSON בלבד.`,
     messages: [
       {
         role: "user",
-        content: `נתח את הידיעה הבאה וכתוב אותה בסגנון NO-FOMO.AI:
+        content: `נתח:
 
 כותרת: ${title}
 URL: ${url}
 
 תוכן:
-${content.slice(0, 4000)}
+${fullContent.slice(0, 5000)}
 
-החזר JSON:
+JSON:
 {
-  "title_he": "כותרת עברית — חדה, מעניינת, מקסימום 10 מילים",
-  "bottom_line": "שורת התקציר — משפט אחד שובה לב (לדוגמה: 'חלון ראווה יפה, מחסן מבולגן')",
-  "what_happened": "מה קרה — משפט אחד עובדתי",
-  "why_matters": "למה זה חשוב — זווית מפתיעה, לא ברורה מאליה",
-  "the_problem": "הבעיה שפתרו — מה היה שבור לפני? (null אם לא רלוונטי לידיעה חדשותית פשוטה)",
-  "the_solution": "הפתרון בשפה פשוטה — איך זה עובד? (null אם לא רלוונטי)",
-  "summary_he": "סיכום מלא בסגנון NO-FOMO.AI — 200-350 מילה לפי המבנה המלא",
+  "title_he": "כותרת עברית — עובדתית, מקסימום 10 מילים",
+  "bottom_line": "מה זה אומר בפועל — משפט אחד למפתח",
+  "what_happened": "עובדה אחת ברורה — מה קרה",
+  "why_matters": "למה זה חשוב — זווית טכנית, לא שיווקית",
+  "the_problem": "הבעיה הטכנית שפתרו / null",
+  "the_solution": "הפתרון הטכני בשפה פשוטה / null",
+  "summary_he": "200-300 מילה עובדתיות ומובנות",
   "who_affected": ["developers"],
   "use_cases": ["שימוש מעשי 1", "שימוש מעשי 2"],
   "impact_score": 3,
@@ -94,8 +147,14 @@ ${content.slice(0, 4000)}
   })
 
   const text = message.content[0].type === "text" ? message.content[0].text : ""
+  return parseJSON<StoryDetails>(text)
+}
 
-  // Strip markdown code blocks if present
-  const jsonText = text.replace(/^```(?:json)?\n?/m, "").replace(/\n?```$/m, "").trim()
-  return JSON.parse(jsonText) as AnalysisResult
+// Backwards compat — used in older code paths
+export async function analyzeArticle(
+  title: string,
+  content: string,
+  url: string
+): Promise<AnalysisResult> {
+  return extractStoryDetails(title, content, url)
 }
