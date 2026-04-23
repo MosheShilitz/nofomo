@@ -2,6 +2,16 @@
  * Telegram Bot — approval flow + channel publishing
  */
 
+function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleString("he-IL", {
+    timeZone: "Asia/Jerusalem",
+    day: "numeric",
+    month: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
 const OWNER_CHAT_ID = process.env.TELEGRAM_OWNER_CHAT_ID!
 const CHANNEL_ID = process.env.TELEGRAM_CHANNEL_ID!
@@ -38,6 +48,7 @@ export async function sendApprovalMessage(article: {
   signal_label: string
   category: string
   original_url: string
+  published_at?: string
   source_display_name: string
   cross_refs_count: number
   first_source?: string
@@ -82,7 +93,9 @@ export async function sendApprovalMessage(article: {
     ? `\n<b>הפתרון</b>\n${article.the_solution}\n`
     : ""
 
-  const text = `${signalEmoji} <b>${article.signal_score}/100</b>  ·  ${stars} ${article.impact_score}/5  ·  🆕 לאישור
+  const dateStr = article.published_at ? `  ·  🕐 ${formatDate(article.published_at)}` : ""
+
+  const text = `${signalEmoji} <b>${article.signal_score}/100</b>  ·  ${stars} ${article.impact_score}/5  ·  🆕 לאישור${dateStr}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 <b>${article.title_he}</b>
 ${bottomLine}${preprintWarning}
@@ -95,7 +108,7 @@ ${article.why_matters}
 👥 ${who}
 ${uses}
 
-${sourceLine}  ·  <a href="${article.original_url}">🔗 מקור</a>`
+${sourceLine}  ·  ${article.original_url}`
 
   // כפתורי inline
   const reply_markup = {
@@ -150,8 +163,11 @@ export async function sendBatchSummary(count: number, topItems: { title_he: stri
 
 export async function publishToChannel(article: {
   title_he: string
+  bottom_line?: string
   what_happened: string
   why_matters: string
+  the_problem?: string | null
+  the_solution?: string | null
   who_affected: string[]
   use_cases: string[]
   impact_score: number
@@ -162,6 +178,7 @@ export async function publishToChannel(article: {
   original_url: string
   source_display_name: string
   source_profile_url: string
+  published_at?: string
 }) {
   const signalEmoji = {
     breaking: "🔴 BREAKING",
@@ -171,52 +188,60 @@ export async function publishToChannel(article: {
   }[article.signal_label] ?? "⚪ עדכון"
 
   const starsMap: Record<number, string> = {
-    1: "⭐",
-    2: "⭐⭐",
-    3: "⭐⭐⭐",
-    4: "⭐⭐⭐⭐",
-    5: "⭐⭐⭐⭐⭐",
+    1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐", 4: "⭐⭐⭐⭐", 5: "⭐⭐⭐⭐⭐",
   }
   const stars = starsMap[article.impact_score] ?? "⭐"
 
   const categoryMap: Record<string, string> = {
-    LLMs: "🧠 LLMs",
-    tools: "🛠️ כלים",
-    research: "🔬 מחקר",
-    safety: "🛡️ בטיחות",
-    robotics: "🤖 רובוטיקה",
-    vision: "👁️ Vision",
-    audio: "🎵 Audio",
-    agents: "🤖 Agents",
-    open_source: "📦 Open Source",
-    business: "💼 עסקי",
-    hardware: "💾 Hardware",
-    policy: "⚖️ מדיניות",
+    LLMs: "🧠 LLMs", tools: "🛠️ כלים", research: "🔬 מחקר",
+    safety: "🛡️ בטיחות", robotics: "🤖 רובוטיקה", vision: "👁️ Vision",
+    audio: "🎵 Audio", agents: "🤖 Agents", open_source: "📦 Open Source",
+    business: "💼 עסקי", hardware: "💾 Hardware", policy: "⚖️ מדיניות",
   }
   const cat = categoryMap[article.category] ?? article.category
+  const dateStr = article.published_at ? `  ·  ${formatDate(article.published_at)}` : ""
 
-  const who = article.who_affected.join(" • ")
-  const uses = article.use_cases.map((u) => `🔧 ${u}`).join("\n")
+  const who = article.who_affected.join(" · ")
+  const uses = article.use_cases.map((u) => `› ${u}`).join("\n")
 
-  const text = `${signalEmoji}  |  ${cat}
+  const bottomLine = article.bottom_line
+    ? `\n<blockquote>${article.bottom_line}</blockquote>\n`
+    : ""
+
+  const problemSection = article.the_problem
+    ? `\n<b>הבעיה שפתרו</b>\n${article.the_problem}\n`
+    : ""
+
+  const solutionSection = article.the_solution
+    ? `\n<b>הפתרון</b>\n${article.the_solution}\n`
+    : ""
+
+  const text = `${signalEmoji}  ·  ${cat}${dateStr}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 <b>${article.title_he}</b>
+${bottomLine}
+<b>מה קרה</b>
+${article.what_happened}
+${problemSection}${solutionSection}
+<b>למה זה חשוב</b>
+${article.why_matters}
 
-${article.summary_he}
-
-👥 על מי משפיע: ${who}
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+👥 ${who}
 ${uses}
 
-${stars} פריצת דרך: ${article.impact_score}/5  |  Signal: ${article.signal_score}/100
+${stars} ${article.impact_score}/5  ·  Signal ${article.signal_score}  ·  📡 ${article.source_display_name}
 
-📎 <a href="${article.original_url}">מקור: ${article.source_display_name}</a>
-\n<i>NO-FOMO.AI — לא תפספסו כלום</i>`
+${article.original_url}
+
+<i>NO-FOMO.AI — לא תפספסו כלום | @nofomo_ai</i>`
 
   return telegramRequest("sendMessage", {
     chat_id: CHANNEL_ID,
     text,
     parse_mode: "HTML",
-    disable_web_page_preview: true,
+    disable_web_page_preview: false,
   })
 }
 

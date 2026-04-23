@@ -30,27 +30,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ processed: 0 })
   }
 
-  // מקסימום 2 מכל source_id, סך הכל 5
+  // מקסימום 2 מכל source_id, נבחר 12 לניתוח
   const seenSources = new Map<string, number>()
   const rawArticles = candidates.filter((a) => {
     const count = seenSources.get(a.source_id) ?? 0
     if (count >= 2) return false
     seenSources.set(a.source_id, count + 1)
     return true
-  }).slice(0, 5)
+  }).slice(0, 12)
 
-  const results = { processed: 0, errors: [] as string[] }
+  // שלב א: נתח את כולם עם Claude
+  const analyzed: Array<{
+    raw: typeof rawArticles[0]
+    analysis: Awaited<ReturnType<typeof analyzeArticle>>
+    signalScore: number
+    signalLabel: ReturnType<typeof getSignalLabel>
+    source: ReturnType<typeof getSourceById>
+  }> = []
+
+  const results = { processed: 0, sent_to_approval: 0, errors: [] as string[] }
 
   for (const raw of rawArticles) {
     try {
-      // נתח עם Claude
-      const analysis = await analyzeArticle(
-        raw.title_en,
-        raw.content_raw,
-        raw.original_url
-      )
-
-      // חשב Signal Score (בסיסי — מקור אחד, ללא cross-ref עדיין)
+      const analysis = await analyzeArticle(raw.title_en, raw.content_raw, raw.original_url)
       const source = getSourceById(raw.source_id)
       const signalScore = calcSignalScore({
         sourceCount: 1,
@@ -60,9 +62,21 @@ export async function POST(req: NextRequest) {
         velocityMinutes: 999,
         impactScore: analysis.impact_score,
       })
-      const signalLabel = getSignalLabel(signalScore)
+      analyzed.push({ raw, analysis, signalScore, signalLabel: getSignalLabel(signalScore), source })
+    } catch (err) {
+      results.errors.push(`analyze ${raw.id}: ${String(err)}`)
+      await supabaseAdmin.from("raw_articles").update({ processed: true }).eq("id", raw.id)
+    }
+  }
 
-      // שמור article מנותח
+  // שלב ב: מיין לפי signal score — שלח רק Top 5 לאישור
+  const sorted = analyzed.sort((a, b) => b.signalScore - a.signalScore)
+  const topFive = new Set(sorted.slice(0, 5).map((a) => a.raw.id))
+
+  for (const { raw, analysis, signalScore, signalLabel, source } of analyzed) {
+    const sendToTelegram = topFive.has(raw.id)
+
+    try {
       const { data: article, error: insertError } = await supabaseAdmin
         .from("articles")
         .insert({
@@ -80,7 +94,7 @@ export async function POST(req: NextRequest) {
           signal_label: signalLabel,
           category: analysis.category,
           published_at: raw.published_at,
-          approval_status: "pending",
+          approval_status: sendToTelegram ? "pending" : "skipped",
         })
         .select()
         .single()
@@ -90,13 +104,12 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      // סמן raw כ-processed
-      await supabaseAdmin
-        .from("raw_articles")
-        .update({ processed: true })
-        .eq("id", raw.id)
+      await supabaseAdmin.from("raw_articles").update({ processed: true }).eq("id", raw.id)
+      results.processed++
 
-      // שלח לאישור ב-Telegram
+      if (!sendToTelegram) continue
+
+      // שלח רק Top 5 לאישור בטלגרם
       const msgId = await sendApprovalMessage({
         is_preprint: isPreprint(raw.source_id),
         id: article.id,
@@ -113,12 +126,12 @@ export async function POST(req: NextRequest) {
         signal_label: signalLabel,
         category: analysis.category,
         original_url: raw.original_url,
+        published_at: raw.published_at,
         source_display_name: source?.credit.display_name ?? raw.source_id,
         cross_refs_count: 0,
         first_source: source?.credit.display_name,
       })
 
-      // שמור approval queue entry
       await supabaseAdmin.from("approval_queue").insert({
         article_id: article.id,
         status: "pending",
@@ -126,14 +139,10 @@ export async function POST(req: NextRequest) {
         sent_at: new Date().toISOString(),
       })
 
-      results.processed++
+      results.sent_to_approval++
     } catch (err) {
       results.errors.push(`article ${raw.id}: ${String(err)}`)
-      // סמן כ-processed בכל מקרה כדי לא לתקוע את התור
-      await supabaseAdmin
-        .from("raw_articles")
-        .update({ processed: true })
-        .eq("id", raw.id)
+      await supabaseAdmin.from("raw_articles").update({ processed: true }).eq("id", raw.id)
     }
   }
 

@@ -46,8 +46,11 @@ async function handleApprove(articleId: string, callbackId: string, messageId?: 
   // פרסם לערוץ
   await publishToChannel({
     title_he: article.title_he,
+    bottom_line: article.bottom_line,
     what_happened: article.what_happened,
     why_matters: article.why_matters,
+    the_problem: article.the_problem,
+    the_solution: article.the_solution,
     who_affected: article.who_affected,
     use_cases: article.use_cases,
     impact_score: article.impact_score,
@@ -56,6 +59,7 @@ async function handleApprove(articleId: string, callbackId: string, messageId?: 
     category: article.category,
     summary_he: article.summary_he,
     original_url: article.original_url,
+    published_at: article.published_at,
     source_display_name: source?.credit.display_name ?? article.source_id,
     source_profile_url: source?.credit.profile_url ?? article.original_url,
   })
