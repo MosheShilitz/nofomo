@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import Link from "next/link"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -8,7 +8,7 @@ import Link from "next/link"
 interface Article {
   id: string
   title_he: string
-  title_en: string
+  title_en: string | null
   bottom_line: string | null
   what_happened: string
   why_matters: string
@@ -24,28 +24,6 @@ interface Article {
   source_id: string
   original_url: string
   published_at: string
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const fmtDate = (d: string) =>
-  new Date(d).toLocaleDateString("he-IL", {
-    timeZone: "Asia/Jerusalem", day: "numeric", month: "long",
-  })
-
-const timeAgo = (d: string) => {
-  const diff = Date.now() - new Date(d).getTime()
-  const h = Math.floor(diff / 3600000)
-  const m = Math.floor(diff / 60000)
-  if (m < 2) return "עכשיו"
-  if (m < 60) return `לפני ${m} ד׳`
-  if (h < 24) return `לפני ${h} ש׳`
-  return fmtDate(d)
-}
-
-const getFrom = (n: number) => {
-  const d = new Date(); d.setDate(d.getDate() - (n + 1) * 7)
-  return d.toISOString().slice(0, 10)
 }
 
 // ─── Data maps ────────────────────────────────────────────────────────────────
@@ -77,13 +55,42 @@ const WHO: Record<string, string> = {
   consumers: "צרכנים", researchers: "חוקרים", policymakers: "מדיניות",
 }
 
-const WEEKS = [
-  { v: 0, label: "השבוע" },
-  { v: 1, label: "שבוע שעבר" },
-  { v: 2, label: "שבועיים" },
-  { v: 4, label: "חודש" },
-  { v: 8, label: "חודשיים" },
-]
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const fmtDate = (d: string) =>
+  new Date(d).toLocaleDateString("he-IL", {
+    timeZone: "Asia/Jerusalem", day: "numeric", month: "long", year: "numeric",
+  })
+
+const timeAgo = (d: string) => {
+  const diff = Date.now() - new Date(d).getTime()
+  const h = Math.floor(diff / 3600000)
+  const m = Math.floor(diff / 60000)
+  if (m < 2) return "עכשיו"
+  if (m < 60) return `לפני ${m} ד׳`
+  if (h < 24) return `לפני ${h} ש׳`
+  const days = Math.floor(h / 24)
+  if (days === 1) return "אתמול"
+  if (days < 7) return `לפני ${days} ימים`
+  return new Date(d).toLocaleDateString("he-IL", { timeZone: "Asia/Jerusalem", day: "numeric", month: "short" })
+}
+
+const getFrom = (n: number) => {
+  const d = new Date(); d.setDate(d.getDate() - (n + 1) * 7)
+  return d.toISOString().slice(0, 10)
+}
+
+const weekLabel = (n: number) => {
+  if (n === 0) return "השבוע"
+  if (n === 1) return "שבוע שעבר"
+  if (n === 2) return "שבועיים"
+  if (n === 4) return "חודש"
+  if (n === 8) return "חודשיים"
+  const d = new Date(); d.setDate(d.getDate() - n * 7)
+  return d.toLocaleDateString("he-IL", { day: "numeric", month: "short" })
+}
+
+const WEEKS = [0, 1, 2, 4, 8, 12, 16]
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -101,6 +108,11 @@ const IcoExternal = () => (
 const IcoSearch = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
     <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+  </svg>
+)
+const IcoClock = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
   </svg>
 )
 
@@ -125,7 +137,41 @@ function SigBadge({ score, label }: { score: number; label: string }) {
   )
 }
 
-// ─── Article Drawer ───────────────────────────────────────────────────────────
+// ─── Ticker ───────────────────────────────────────────────────────────────────
+
+function Ticker({ articles }: { articles: Article[] }) {
+  const items = [...articles.slice(0, 8), ...articles.slice(0, 8)]
+  return (
+    <div style={{
+      background: "oklch(16% 0.012 260)", height: 34,
+      display: "flex", alignItems: "center", overflow: "hidden",
+    }}>
+      <div style={{
+        flexShrink: 0, padding: "0 16px",
+        fontFamily: "'Rubik', sans-serif",
+        fontSize: 10, fontWeight: 700, letterSpacing: "0.22em",
+        color: "oklch(50% 0.21 25)",
+        borderLeft: "1px solid oklch(25% 0.01 260)",
+        height: "100%", display: "flex", alignItems: "center",
+      }}>LIVE</div>
+      <div style={{ overflow: "hidden", flex: 1 }}>
+        <div style={{ display: "flex", gap: 48, whiteSpace: "nowrap", animation: "ticker 55s linear infinite" }}>
+          {items.map((a, i) => {
+            const sig = SIG[a.signal_label] ?? SIG.normal
+            return (
+              <span key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "'Rubik', sans-serif", fontSize: 12, color: "oklch(68% 0.008 255)" }}>
+                <span style={{ fontWeight: 700, color: sig.color }}>{a.signal_score}</span>
+                {a.title_he}
+              </span>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Drawer ───────────────────────────────────────────────────────────────────
 
 function Drawer({ article, onClose }: { article: Article; onClose: () => void }) {
   const sig = SIG[article.signal_label] ?? SIG.normal
@@ -178,7 +224,7 @@ function Drawer({ article, onClose }: { article: Article; onClose: () => void })
             <span style={{
               fontFamily: "'Rubik', sans-serif",
               fontSize: 12, fontWeight: 600, color: cat.color,
-              background: cat.color.replace("oklch(", "oklch(").replace(")", " / 0.1)").replace("oklch(", "oklch("),
+              background: cat.color.replace("oklch(", "oklch(").replace("%)", "% / 0.1)"),
               padding: "3px 10px", borderRadius: 20,
             }}>{cat.label}</span>
           )}
@@ -351,7 +397,7 @@ function HeroCard({ a, onClick }: { a: Article; onClick: () => void }) {
               fontFamily: "'Rubik', sans-serif",
               fontSize: 12, fontWeight: 600, color: cat.color,
               padding: "3px 10px", borderRadius: 20,
-              background: `${cat.color.slice(0, -1)} / 0.1)`.replace("oklch(", "oklch("),
+              background: cat.color.replace("oklch(", "oklch(").replace("%)", "% / 0.1)"),
             }}>{cat.label}</span>
           )}
           <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, color: "var(--t3)", marginRight: "auto" }}>
@@ -408,9 +454,9 @@ function HeroCard({ a, onClick }: { a: Article; onClick: () => void }) {
   )
 }
 
-// ─── Article Card ─────────────────────────────────────────────────────────────
+// ─── Feature Card ─────────────────────────────────────────────────────────────
 
-function ArticleCard({ a, onClick }: { a: Article; onClick: () => void }) {
+function FeatureCard({ a, onClick }: { a: Article; onClick: () => void }) {
   const sig = SIG[a.signal_label] ?? SIG.normal
   const cat = CAT[a.category]
   const [hov, setHov] = useState(false)
@@ -425,6 +471,7 @@ function ArticleCard({ a, onClick }: { a: Article; onClick: () => void }) {
       transition: "box-shadow 0.2s ease, transform 0.2s ease",
       transform: hov ? "translateY(-2px)" : "translateY(0)",
       cursor: "pointer",
+      display: "flex", flexDirection: "column",
     }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
@@ -433,7 +480,7 @@ function ArticleCard({ a, onClick }: { a: Article; onClick: () => void }) {
         background: "none", border: "none", cursor: "pointer",
         textAlign: "right", width: "100%",
         padding: "22px 24px 20px",
-        display: "flex", flexDirection: "column", gap: 12,
+        display: "flex", flexDirection: "column", gap: 12, flex: 1,
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <SigBadge score={a.signal_score} label={a.signal_label} />
@@ -458,9 +505,81 @@ function ArticleCard({ a, onClick }: { a: Article; onClick: () => void }) {
             fontFamily: "'Rubik', sans-serif", fontSize: 14, color: "var(--t2)",
             lineHeight: 1.75, textAlign: "right",
           }}>
-            {(a.bottom_line ?? a.what_happened ?? "").slice(0, 120) + "…"}
+            {(a.bottom_line ?? a.what_happened ?? "").slice(0, 130) + "…"}
           </p>
         )}
+
+        {/* Score bar at bottom */}
+        <div style={{
+          marginTop: "auto", paddingTop: 14,
+          borderTop: "1px solid oklch(94% 0.005 255)",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <div style={{ flex: 1, height: 3, background: "oklch(93% 0.005 255)", borderRadius: 2 }}>
+            <div style={{ width: `${a.signal_score}%`, height: "100%", background: sig.color, borderRadius: 2 }} />
+          </div>
+          <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 12, fontWeight: 700, color: sig.color, flexShrink: 0 }}>
+            {a.signal_score}
+          </span>
+        </div>
+      </button>
+    </article>
+  )
+}
+
+// ─── Compact Card ─────────────────────────────────────────────────────────────
+
+function CompactCard({ a, onClick }: { a: Article; onClick: () => void }) {
+  const sig = SIG[a.signal_label] ?? SIG.normal
+  const cat = CAT[a.category]
+  const [hov, setHov] = useState(false)
+
+  return (
+    <article style={{
+      background: "oklch(100% 0 0)",
+      borderRadius: 14,
+      boxShadow: hov
+        ? "0 4px 18px oklch(20% 0.01 260 / 0.08), 0 0 0 1px oklch(85% 0.006 255)"
+        : "0 1px 3px oklch(20% 0.01 260 / 0.04), 0 0 0 1px oklch(91% 0.005 255)",
+      transition: "box-shadow 0.18s ease, transform 0.18s ease",
+      transform: hov ? "translateY(-1px)" : "translateY(0)",
+      cursor: "pointer",
+    }}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+    >
+      <button onClick={onClick} style={{
+        background: "none", border: "none", cursor: "pointer",
+        textAlign: "right", width: "100%",
+        padding: "16px 18px",
+        display: "flex", alignItems: "flex-start", gap: 14,
+      }}>
+        {/* Score pillar */}
+        <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, paddingTop: 2 }}>
+          <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 20, fontWeight: 800, lineHeight: 1, color: sig.color }}>
+            {a.signal_score}
+          </span>
+          <div style={{ width: 2, height: 30, borderRadius: 1, background: sig.color, opacity: 0.2 }} />
+        </div>
+
+        {/* Text */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {cat && (
+              <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 11, fontWeight: 600, color: cat.color }}>
+                {cat.label}
+              </span>
+            )}
+            <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 11, color: "var(--t3)" }}>
+              {timeAgo(a.published_at)}
+            </span>
+          </div>
+          <h3 style={{
+            fontFamily: "'Rubik', sans-serif",
+            fontSize: "clamp(14px, 1.4vw, 16px)", fontWeight: 700,
+            lineHeight: 1.45, color: "var(--t1)", textAlign: "right",
+          }}>{a.title_he}</h3>
+        </div>
       </button>
     </article>
   )
@@ -505,60 +624,66 @@ function ArchiveRow({ a, onClick }: { a: Article; onClick: () => void }) {
   )
 }
 
-// ─── Ticker ───────────────────────────────────────────────────────────────────
+// ─── Loading / Empty ──────────────────────────────────────────────────────────
 
-function Ticker({ articles }: { articles: Article[] }) {
-  const items = [...articles.slice(0, 8), ...articles.slice(0, 8)]
+function Spinner() {
   return (
-    <div style={{
-      background: "oklch(16% 0.012 260)", height: 34,
-      display: "flex", alignItems: "center", overflow: "hidden",
-    }}>
-      <div style={{
-        flexShrink: 0, padding: "0 16px",
-        fontFamily: "'Rubik', sans-serif",
-        fontSize: 10, fontWeight: 700, letterSpacing: "0.22em",
-        color: "oklch(50% 0.21 25)",
-        borderLeft: "1px solid oklch(25% 0.01 260)",
-        height: "100%", display: "flex", alignItems: "center",
-      }}>LIVE</div>
-      <div style={{ overflow: "hidden", flex: 1 }}>
-        <div style={{ display: "flex", gap: 48, whiteSpace: "nowrap", animation: "ticker 55s linear infinite" }}>
-          {items.map((a, i) => {
-            const sig = SIG[a.signal_label] ?? SIG.normal
-            return (
-              <span key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontFamily: "'Rubik', sans-serif", fontSize: 12, color: "oklch(68% 0.008 255)" }}>
-                <span style={{ fontWeight: 700, color: sig.color }}>{a.signal_score}</span>
-                {a.title_he}
-              </span>
-            )
-          })}
-        </div>
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "120px 0" }} role="status">
+      <div style={{ width: 32, height: 32, border: "2px solid var(--border)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+      <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 15, color: "var(--t3)" }}>טוען ידיעות...</span>
+    </div>
+  )
+}
+
+function Empty({ query }: { query: string }) {
+  return (
+    <div style={{ textAlign: "center", padding: "120px 0" }}>
+      <p style={{ fontFamily: "'Rubik', sans-serif", fontSize: 20, color: "var(--t2)", fontWeight: 500 }}>
+        {query ? `אין תוצאות עבור "${query}"` : "אין ידיעות בתקופה זו"}
+      </p>
+    </div>
+  )
+}
+
+// ─── Section Divider ──────────────────────────────────────────────────────────
+
+function SectionDivider({ label, count }: { label: string; count?: number }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+      <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, fontWeight: 600, color: "var(--t3)", letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap" }}>
+        {label}
+      </span>
+      {count !== undefined && (
+        <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, color: "var(--t3)" }}>
+          {count} ידיעות
+        </span>
+      )}
+      <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
     </div>
   )
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function HomePage() {
+export default function ArchivePage() {
   const [articles, setArticles] = useState<Article[]>([])
-  const [loading, setLoading] = useState(true)
-  const [cat, setCat] = useState<string | null>(null)
-  const [week, setWeek] = useState(0)
-  const [q, setQ] = useState("")
+  const [loading, setLoading]   = useState(true)
+  const [cat, setCat]           = useState<string | null>(null)
+  const [week, setWeek]         = useState(0)
+  const [q, setQ]               = useState("")
   const [selected, setSelected] = useState<Article | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    let live = true
+    let alive = true
     setLoading(true)
     const p = new URLSearchParams({ limit: "200", from: getFrom(week) })
     if (cat) p.set("category", cat)
     fetch(`/api/articles?${p}`)
       .then(r => r.json())
-      .then(d => { if (live) { setArticles(d.articles ?? []); setLoading(false) } })
-      .catch(() => { if (live) setLoading(false) })
-    return () => { live = false }
+      .then(d => { if (alive) { setArticles(d.articles ?? []); setLoading(false) } })
+      .catch(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
   }, [cat, week])
 
   const filtered = useMemo(() => {
@@ -571,16 +696,27 @@ export default function HomePage() {
     )
   }, [articles, q])
 
-  const usedCats = useMemo(() => [...new Set(articles.map(a => a.category))].filter(Boolean), [articles])
+  const usedCats = useMemo(() =>
+    [...new Set(articles.map(a => a.category))].filter(Boolean), [articles])
+
   const closeDrawer = useCallback(() => setSelected(null), [])
 
-  const hero    = filtered[0] ?? null
-  const cards   = filtered.slice(1, 7)
-  const archive = filtered.slice(7)
+  // Layout split: hero → featured 2-up → compact grid → archive rows
+  const hero     = filtered[0] ?? null
+  const featured = filtered.slice(1, 3)
+  const compact  = filtered.slice(3, 9)
+  const rows     = filtered.slice(9)
 
-  const now = new Date().toLocaleDateString("he-IL", {
-    timeZone: "Asia/Jerusalem", weekday: "long", day: "numeric", month: "long", year: "numeric",
-  })
+  // Keyboard shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "/" && document.activeElement?.tagName !== "INPUT") {
+        e.preventDefault(); inputRef.current?.focus()
+      }
+    }
+    document.addEventListener("keydown", handler)
+    return () => document.removeEventListener("keydown", handler)
+  }, [])
 
   return (
     <>
@@ -608,10 +744,10 @@ export default function HomePage() {
           -webkit-font-smoothing: antialiased;
         }
 
-        @keyframes ovIn   { from { opacity: 0; }              to { opacity: 1; } }
+        @keyframes ovIn   { from { opacity: 0; }                  to { opacity: 1; } }
         @keyframes drIn   { from { transform: translateX(-100%); } to { transform: translateX(0); } }
         @keyframes spin   { to { transform: rotate(360deg); } }
-        @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        @keyframes ticker { from { transform: translateX(0); }     to { transform: translateX(-50%); } }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
         button:focus-visible, a:focus-visible {
@@ -625,11 +761,8 @@ export default function HomePage() {
           *, *::before, *::after { animation: none !important; transition: none !important; }
         }
 
-        .card-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: 16px;
-        }
+        .hscroll { overflow-x: auto; scrollbar-width: none; }
+        .hscroll::-webkit-scrollbar { display: none; }
 
         .week-tab {
           font-family: 'Rubik', sans-serif;
@@ -639,6 +772,7 @@ export default function HomePage() {
           color: var(--t3); transition: color 0.15s;
           border-bottom: 2px solid transparent;
           margin-bottom: -1px; font-weight: 500;
+          display: flex; align-items: center; gap: 6px;
         }
         .week-tab:hover { color: var(--t2); }
         .week-tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
@@ -655,9 +789,6 @@ export default function HomePage() {
         .cat-btn:hover { border-color: oklch(80% 0.008 255); color: var(--t2); }
         .cat-btn.on { background: var(--accent); border-color: var(--accent); color: oklch(99% 0 0); }
 
-        .hscroll { overflow-x: auto; scrollbar-width: none; }
-        .hscroll::-webkit-scrollbar { display: none; }
-
         .nav-link {
           font-family: 'Rubik', sans-serif;
           font-size: 14px; font-weight: 500;
@@ -667,6 +798,21 @@ export default function HomePage() {
         }
         .nav-link:hover { color: var(--t1); background: oklch(95% 0.006 255); }
         .nav-link.active { color: var(--t1); font-weight: 600; }
+
+        .featured-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 16px;
+        }
+        .compact-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          gap: 12px;
+        }
+        @media (max-width: 768px) {
+          .featured-grid { grid-template-columns: 1fr; }
+          .compact-grid  { grid-template-columns: 1fr; }
+        }
       `}</style>
 
       <div style={{ minHeight: "100vh", background: "var(--bg)", direction: "rtl" }}>
@@ -684,7 +830,7 @@ export default function HomePage() {
             <div style={{ display: "flex", alignItems: "center", gap: 20, height: 64 }}>
 
               {/* Brand */}
-              <a href="/" style={{ textDecoration: "none", flexShrink: 0 }}>
+              <Link href="/" style={{ textDecoration: "none", flexShrink: 0 }}>
                 <span style={{
                   fontFamily: "'Rubik', sans-serif",
                   fontSize: 22, fontWeight: 900,
@@ -692,20 +838,32 @@ export default function HomePage() {
                 }}>
                   NO‑FOMO<span style={{ color: "var(--accent)" }}>.</span>AI
                 </span>
-              </a>
+              </Link>
 
               {/* Nav */}
               <nav style={{ display: "flex", gap: 2, alignItems: "center" }} aria-label="ניווט">
-                <a href="/" className="nav-link active">פיד</a>
-                <Link href="/archive" className="nav-link">ארכיון</Link>
+                <Link href="/" className="nav-link">פיד</Link>
+                <a href="/archive" className="nav-link active">ארכיון</a>
               </nav>
 
               <div style={{ flex: 1 }} />
 
-              {/* Date */}
-              <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, color: "var(--t3)", flexShrink: 0 }}>
-                {now}
-              </span>
+              {/* Count */}
+              {!loading && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  <IcoClock />
+                  <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 14, fontWeight: 600, color: "var(--t2)" }}>
+                    מכונת הזמן
+                  </span>
+                  <span style={{
+                    fontFamily: "'Rubik', sans-serif", fontSize: 13, color: "var(--t3)",
+                    background: "var(--bg)", border: "1px solid var(--border)",
+                    padding: "3px 10px", borderRadius: 20,
+                  }}>
+                    {filtered.length} ידיעות
+                  </span>
+                </div>
+              )}
 
               {/* Telegram */}
               <a href="https://t.me/nofomo_ai" target="_blank" rel="noopener noreferrer"
@@ -739,13 +897,14 @@ export default function HomePage() {
             <div style={{ display: "flex", alignItems: "center", minHeight: 50 }}>
 
               {/* Week tabs */}
-              <div className="hscroll" style={{ display: "flex", borderLeft: "1px solid var(--border)" }}>
+              <nav className="hscroll" style={{ display: "flex", borderLeft: "1px solid var(--border)" }} aria-label="בחירת תקופה">
                 {WEEKS.map(w => (
-                  <button key={w.v} className={`week-tab ${week === w.v ? "on" : ""}`} onClick={() => setWeek(w.v)}>
-                    {w.label}
+                  <button key={w} className={`week-tab ${week === w ? "on" : ""}`}
+                    onClick={() => setWeek(w)} aria-pressed={week === w}>
+                    {weekLabel(w)}
                   </button>
                 ))}
-              </div>
+              </nav>
 
               <div style={{ width: 1, height: 20, background: "var(--border)", flexShrink: 0, margin: "0 12px" }} />
 
@@ -757,7 +916,7 @@ export default function HomePage() {
                   return (
                     <button key={c} className={`cat-btn ${cat === c ? "on" : ""}`}
                       onClick={() => setCat(cat === c ? null : c)}
-                      style={cat !== c && info ? { color: info.color, borderColor: `${info.color.slice(0, -1)} / 0.4)` } : {}}
+                      style={cat !== c && info ? { color: info.color, borderColor: info.color.replace("oklch(", "oklch(").replace("%)", "% / 0.4)") } : {}}
                     >{info?.label ?? c}</button>
                   )
                 })}
@@ -769,13 +928,14 @@ export default function HomePage() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ color: "var(--t3)", display: "flex", flexShrink: 0 }}><IcoSearch /></span>
                 <input
+                  ref={inputRef}
                   type="search" placeholder="חיפוש..." value={q}
                   onChange={e => setQ(e.target.value)} dir="rtl"
-                  aria-label="חיפוש ידיעות"
+                  aria-label="חיפוש בארכיון"
                   style={{
                     background: "none", border: "none", outline: "none",
                     fontFamily: "'Rubik', sans-serif", fontSize: 14,
-                    color: "var(--t1)", width: 130,
+                    color: "var(--t1)", width: 140,
                   }}
                 />
               </div>
@@ -784,70 +944,57 @@ export default function HomePage() {
         </div>
 
         {/* ── MAIN ── */}
-        <main style={{ maxWidth: 1360, margin: "0 auto", padding: "28px 28px 100px" }}>
+        <main style={{ maxWidth: 1360, margin: "0 auto", padding: "28px 28px 100px" }} aria-label="ארכיון ידיעות">
 
           {loading ? (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "120px 0" }} role="status">
-              <div style={{ width: 32, height: 32, border: "2px solid var(--border)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-              <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 15, color: "var(--t3)" }}>טוען ידיעות...</span>
-            </div>
-
+            <Spinner />
           ) : filtered.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "120px 0" }}>
-              <p style={{ fontFamily: "'Rubik', sans-serif", fontSize: 20, color: "var(--t2)", fontWeight: 500 }}>
-                {q ? `אין תוצאות עבור "${q}"` : "אין ידיעות בתקופה זו"}
-              </p>
-              {q && (
-                <button onClick={() => setQ("")} style={{ marginTop: 14, fontFamily: "'Rubik', sans-serif", fontSize: 15, color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
-                  נקה חיפוש
-                </button>
-              )}
-            </div>
-
+            <Empty query={q} />
           ) : (
-            <div style={{ animation: "fadeUp 0.35s cubic-bezier(0.22, 1, 0.36, 1)", display: "flex", flexDirection: "column", gap: 28 }}>
+            <div style={{ animation: "fadeUp 0.35s cubic-bezier(0.22, 1, 0.36, 1)", display: "flex", flexDirection: "column", gap: 32 }}>
 
               {/* Hero */}
-              {hero && <HeroCard a={hero} onClick={() => setSelected(hero)} />}
-
-              {/* Grid */}
-              {cards.length > 0 && (
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-                    <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, fontWeight: 600, color: "var(--t3)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                      עוד מהתקופה
-                    </span>
-                    <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
-                  </div>
-                  <div className="card-grid">
-                    {cards.map(a => <ArticleCard key={a.id} a={a} onClick={() => setSelected(a)} />)}
-                  </div>
-                </div>
+              {hero && (
+                <section aria-label="ידיעה מובילה">
+                  <SectionDivider label="ידיעה מובילה" />
+                  <HeroCard a={hero} onClick={() => setSelected(hero)} />
+                </section>
               )}
 
-              {/* Archive */}
-              {archive.length > 0 && (
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 0 }}>
-                    <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, fontWeight: 600, color: "var(--t3)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                      ארכיון
-                    </span>
-                    <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, color: "var(--t3)" }}>
-                      {archive.length} פריטים נוספים
-                    </span>
-                    <span style={{ flex: 1, height: 1, background: "var(--border)" }} />
+              {/* Featured 2-up */}
+              {featured.length > 0 && (
+                <section aria-label="ידיעות בולטות">
+                  <SectionDivider label="ידיעות בולטות" />
+                  <div className="featured-grid">
+                    {featured.map(a => <FeatureCard key={a.id} a={a} onClick={() => setSelected(a)} />)}
                   </div>
+                </section>
+              )}
+
+              {/* Compact grid */}
+              {compact.length > 0 && (
+                <section aria-label="עוד ידיעות">
+                  <SectionDivider label="עוד מהתקופה" />
+                  <div className="compact-grid">
+                    {compact.map(a => <CompactCard key={a.id} a={a} onClick={() => setSelected(a)} />)}
+                  </div>
+                </section>
+              )}
+
+              {/* Archive rows */}
+              {rows.length > 0 && (
+                <section aria-label="כל הידיעות">
+                  <SectionDivider label="ארכיון" count={rows.length} />
                   <div style={{
                     background: "oklch(100% 0 0)",
-                    borderRadius: 16, marginTop: 14,
+                    borderRadius: 16,
                     boxShadow: "0 1px 4px oklch(20% 0.01 260 / 0.05), 0 0 0 1px var(--border)",
                     overflow: "hidden",
                   }}>
-                    {archive.map(a => <ArchiveRow key={a.id} a={a} onClick={() => setSelected(a)} />)}
+                    {rows.map(a => <ArchiveRow key={a.id} a={a} onClick={() => setSelected(a)} />)}
                   </div>
-                </div>
+                </section>
               )}
-
             </div>
           )}
         </main>
@@ -858,7 +1005,7 @@ export default function HomePage() {
             <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 17, fontWeight: 900, color: "var(--t1)", letterSpacing: "-0.02em" }}>
               NO‑FOMO<span style={{ color: "var(--accent)" }}>.</span>AI
             </span>
-            <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, color: "var(--t3)" }}>לא תפספסו כלום</span>
+            <span style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, color: "var(--t3)" }}>ארכיון ידיעות AI</span>
             <div style={{ flex: 1 }} />
             <a href="https://t.me/nofomo_ai" target="_blank" rel="noopener noreferrer"
               style={{ fontFamily: "'Rubik', sans-serif", fontSize: 13, color: "var(--t3)", textDecoration: "none", transition: "color 0.15s" }}

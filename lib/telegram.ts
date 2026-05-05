@@ -247,6 +247,15 @@ ${article.original_url}
 
 // ─── ענה על callback (כפתורי approval) ────────────────────────────
 
+export async function sendMessage(chat_id: string, text: string) {
+  return telegramRequest("sendMessage", {
+    chat_id,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+  })
+}
+
 export async function answerCallback(callback_query_id: string, text: string) {
   return telegramRequest("answerCallbackQuery", {
     callback_query_id,

@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabaseAdmin
     .from("articles")
-    .select("id, title_he, title_en, what_happened, why_matters, summary_he, category, signal_score, signal_label, impact_score, who_affected, use_cases, source_id, original_url, published_at, approval_status, created_at")
+    .select("id, title_he, title_en, bottom_line, what_happened, why_matters, the_problem, the_solution, summary_he, category, signal_score, signal_label, impact_score, who_affected, use_cases, source_id, original_url, published_at, approval_status")
     .eq("approval_status", "approved")
     .order("published_at", { ascending: false })
     .limit(limit)

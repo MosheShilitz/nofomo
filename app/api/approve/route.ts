@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase"
-import { publishToChannel, answerCallback, editMessageText } from "@/lib/telegram"
+import { publishToChannel, answerCallback, editMessageText, sendMessage } from "@/lib/telegram"
 import { getSourceById } from "@/lib/sources"
 
 export async function POST(req: NextRequest) {
@@ -20,8 +20,20 @@ export async function POST(req: NextRequest) {
       await handleApprove(articleId, callbackId, message?.message_id)
     } else if (action === "reject" && articleId) {
       await handleReject(articleId, callbackId, message?.message_id)
+    } else if (action === "edit" && articleId) {
+      await handleEdit(articleId, callbackId)
     } else if (action === "approve_all") {
       await handleApproveAll(callbackId)
+    }
+  }
+
+  // טיפול בהודעת טקסט — עריכת שדה
+  // פורמט: EDIT:[articleId] field:ערך חדש
+  // שדות: title | bottom_line | what_happened | why_matters
+  if (body.message?.text) {
+    const text = body.message.text as string
+    if (text.startsWith("EDIT:")) {
+      await handleEditMessage(text)
     }
   }
 
@@ -113,6 +125,68 @@ async function handleReject(articleId: string, callbackId: string, messageId?: n
       `❌ <b>נדחה</b>\n${article.title_he}`
     )
   }
+}
+
+async function handleEdit(articleId: string, callbackId: string) {
+  const { data: article } = await supabaseAdmin
+    .from("articles")
+    .select("id, title_he, bottom_line, what_happened, why_matters")
+    .eq("id", articleId)
+    .single()
+
+  if (!article) {
+    await answerCallback(callbackId, "❌ לא נמצא")
+    return
+  }
+
+  await answerCallback(callbackId, "✏️ שלח עריכה")
+
+  const instructions = `✏️ <b>עריכת ידיעה</b>
+ID: <code>${article.id}</code>
+
+<b>שדות לעריכה:</b>
+• <code>title</code> — ${article.title_he}
+• <code>bottom_line</code> — ${article.bottom_line ?? "—"}
+• <code>what_happened</code> — ${(article.what_happened ?? "").slice(0, 80)}...
+• <code>why_matters</code> — ${(article.why_matters ?? "").slice(0, 80)}...
+
+<b>פורמט שליחה:</b>
+<code>EDIT:${article.id} title:כותרת חדשה</code>
+<code>EDIT:${article.id} bottom_line:שורה תחתונה חדשה</code>
+<code>EDIT:${article.id} what_happened:טקסט חדש</code>
+<code>EDIT:${article.id} why_matters:טקסט חדש</code>`
+
+  await sendMessage(process.env.TELEGRAM_OWNER_CHAT_ID!, instructions)
+}
+
+async function handleEditMessage(text: string) {
+  // EDIT:[articleId] field:value
+  const match = text.match(/^EDIT:([a-f0-9-]+)\s+(\w+):([\s\S]+)$/)
+  if (!match) {
+    await sendMessage(process.env.TELEGRAM_OWNER_CHAT_ID!, "❌ פורמט שגוי. דוגמה:\n<code>EDIT:[id] title:כותרת חדשה</code>")
+    return
+  }
+
+  const [, articleId, field, value] = match
+  const allowedFields = ["title_he", "title", "bottom_line", "what_happened", "why_matters"]
+  const dbField = field === "title" ? "title_he" : field
+
+  if (!allowedFields.includes(dbField)) {
+    await sendMessage(process.env.TELEGRAM_OWNER_CHAT_ID!, `❌ שדה לא מוכר: ${field}`)
+    return
+  }
+
+  const { error } = await supabaseAdmin
+    .from("articles")
+    .update({ [dbField]: value.trim() })
+    .eq("id", articleId)
+
+  if (error) {
+    await sendMessage(process.env.TELEGRAM_OWNER_CHAT_ID!, `❌ שגיאה: ${error.message}`)
+    return
+  }
+
+  await sendMessage(process.env.TELEGRAM_OWNER_CHAT_ID!, `✅ <b>${field}</b> עודכן בהצלחה`)
 }
 
 async function handleApproveAll(callbackId: string) {
