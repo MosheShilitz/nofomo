@@ -1,36 +1,84 @@
 import Anthropic from "@anthropic-ai/sdk"
+import { z } from "zod"
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Schemas (Zod) ────────────────────────────────────────────────────────────
 
-export interface BatchResult {
-  url: string
-  original_title: string
-  signal_score: number
-  merged_urls?: string[]
-}
+const BatchResultSchema = z.object({
+  url: z.string(),
+  original_title: z.string(),
+  signal_score: z.number().min(0).max(100),
+  merged_urls: z.array(z.string()).optional(),
+})
 
-export interface StoryDetails {
-  title_he: string
-  bottom_line: string
-  what_happened: string
-  why_matters: string
-  the_problem: string | null
-  the_solution: string | null
-  summary_he: string
-  who_affected: string[]
-  use_cases: string[]
-  impact_score: 1 | 2 | 3 | 4 | 5
-  category: string
-}
+const BatchResultArraySchema = z.array(BatchResultSchema)
+
+const WhoAffectedEnum = z.enum([
+  "developers",
+  "business",
+  "consumers",
+  "researchers",
+  "policymakers",
+])
+
+const CategoryEnum = z.enum([
+  "LLMs",
+  "tools",
+  "research",
+  "robotics",
+  "safety",
+  "policy",
+  "vision",
+  "audio",
+  "agents",
+  "open_source",
+  "business",
+  "hardware",
+])
+
+const StoryDetailsSchema = z.object({
+  title_he: z.string().min(1),
+  bottom_line: z.string().min(1),
+  what_happened: z.string().min(1),
+  why_matters: z.string().min(1),
+  the_problem: z.string().nullable(),
+  the_solution: z.string().nullable(),
+  summary_he: z.string().min(1),
+  who_affected: z.array(WhoAffectedEnum),
+  use_cases: z.array(z.string()),
+  impact_score: z.union([
+    z.literal(1),
+    z.literal(2),
+    z.literal(3),
+    z.literal(4),
+    z.literal(5),
+  ]),
+  category: CategoryEnum,
+})
+
+// ─── Types (derived from schemas) ─────────────────────────────────────────────
+
+export type BatchResult = z.infer<typeof BatchResultSchema>
+export type StoryDetails = z.infer<typeof StoryDetailsSchema>
 
 // Backwards compat
 export type AnalysisResult = StoryDetails
 
-function parseJSON<T>(text: string): T {
+function parseAndValidate<T extends z.ZodType>(schema: T, text: string): z.infer<T> {
   const clean = text.replace(/^```(?:json)?\n?/m, "").replace(/\n?```$/m, "").trim()
-  return JSON.parse(clean) as T
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(clean)
+  } catch (e) {
+    throw new Error(`Claude returned invalid JSON: ${(e as Error).message}\nRaw: ${clean.slice(0, 200)}`)
+  }
+  const result = schema.safeParse(parsed)
+  if (!result.success) {
+    const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+    throw new Error(`Claude response failed schema validation: ${issues}`)
+  }
+  return result.data
 }
 
 // ─── Stage 1: Batch Triage ────────────────────────────────────────────────────
@@ -71,7 +119,7 @@ Return ONLY a valid JSON array of the TOP 5 items by signal_score. No explanatio
   })
 
   const text = message.content[0].type === "text" ? message.content[0].text : "[]"
-  return parseJSON<BatchResult[]>(text)
+  return parseAndValidate(BatchResultArraySchema, text)
 }
 
 // ─── Stage 2: Detail Extraction ───────────────────────────────────────────────
@@ -156,7 +204,7 @@ JSON:
   })
 
   const text = message.content[0].type === "text" ? message.content[0].text : ""
-  return parseJSON<StoryDetails>(text)
+  return parseAndValidate(StoryDetailsSchema, text)
 }
 
 // Backwards compat — used in older code paths
