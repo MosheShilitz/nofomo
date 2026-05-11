@@ -1,8 +1,8 @@
 /**
  * POST /api/analyze
  * Two-stage pipeline:
- *   Stage 1 — analyzeBatch(): lean triage, Claude picks top 5 by anti-hype signal
- *   Stage 2 — extractStoryDetails(): parallel full Hebrew extraction on the 5 winners
+ *   Stage 1 — analyzeBatch(): lean triage, Claude scores every item by anti-hype signal
+ *   Stage 2 — extractStoryDetails(): parallel full Hebrew extraction on items above the threshold
  */
 
 import { NextRequest, NextResponse } from "next/server"
@@ -73,22 +73,36 @@ export async function POST(req: NextRequest) {
   // בנה map מ-URL → raw article לאיתור מהיר
   const urlToRaw = new Map(rawArticles.map((a) => [a.original_url, a]))
 
-  // Top 5 מה-batch — מותאמות ל-raw articles
-  const top5 = batchResults.slice(0, 5).map((result) => ({
-    batchResult: result,
-    raw: urlToRaw.get(result.url),
-  })).filter((item): item is { batchResult: typeof batchResults[0]; raw: NonNullable<typeof rawArticles[0]> } =>
-    item.raw !== undefined
-  )
+  // ─── Dynamic top-N — לפי signal_score, לא מספר קבוע ─────────────────────────
+  // יום שקט = 1-2 ידיעות. יום בועט (conference release) = עד 8.
+  // Threshold גבוה = breaking/major בלבד; אם backlog דליל, נחזור לערך נמוך יותר.
+  const PRIMARY_THRESHOLD = 55
+  const FALLBACK_THRESHOLD = 35
+  const MIN_ITEMS = 1
+  const MAX_ITEMS = 8
 
-  // כל ה-URLs שנבחרו ל-top5
-  const topUrls = new Set(top5.map((item) => item.batchResult.url))
+  const sorted = [...batchResults].sort((a, b) => b.signal_score - a.signal_score)
+  let chosen = sorted.filter((r) => r.signal_score >= PRIMARY_THRESHOLD)
+  if (chosen.length < MIN_ITEMS) {
+    chosen = sorted.filter((r) => r.signal_score >= FALLBACK_THRESHOLD).slice(0, MIN_ITEMS)
+  }
+  chosen = chosen.slice(0, MAX_ITEMS)
+
+  const topPicks = chosen
+    .map((result) => ({ batchResult: result, raw: urlToRaw.get(result.url) }))
+    .filter(
+      (item): item is { batchResult: typeof batchResults[0]; raw: NonNullable<typeof rawArticles[0]> } =>
+        item.raw !== undefined
+    )
+
+  // כל ה-URLs שנבחרו לעיבוד מלא
+  const topUrls = new Set(topPicks.map((item) => item.batchResult.url))
 
   // ─── שלב 2: Detail Extraction (מקביל) ────────────────────────────────────
   // extractStoryDetails רץ במקביל על כל 5 הידיעות הנבחרות
 
   const detailResults = await Promise.allSettled(
-    top5.map(async ({ batchResult, raw }) => {
+    topPicks.map(async ({ batchResult, raw }) => {
       const source = getSourceById(raw.source_id)
       const details = await extractStoryDetails(
         raw.title_en,
@@ -106,7 +120,7 @@ export async function POST(req: NextRequest) {
 
   // ─── שמור ל-DB ו-Telegram ─────────────────────────────────────────────────
 
-  // שמור top 5 (fulfilled)
+  // שמור את ה-picks (fulfilled)
   for (const settled of detailResults) {
     if (settled.status === "rejected") {
       results.errors.push(`extractStoryDetails failed: ${String(settled.reason)}`)
@@ -152,7 +166,7 @@ export async function POST(req: NextRequest) {
         .single()
 
       if (insertError || !article) {
-        results.errors.push(`insert top5: ${insertError?.message}`)
+        results.errors.push(`insert topPicks: ${insertError?.message}`)
         continue
       }
 

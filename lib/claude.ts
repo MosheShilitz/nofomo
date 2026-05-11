@@ -97,7 +97,7 @@ export async function analyzeBatch(
 
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 800,
+    max_tokens: 1500,
     system: `You are the Senior Tech Editor for NO-FOMO.AI. Your ONLY job right now is TRIAGE.
 
 ANTI-HYPE SIGNAL SCORING RUBRIC (0-100):
@@ -109,11 +109,12 @@ Base score: 50
 
 DEDUPLICATION: If multiple items cover the SAME event, merge into ONE entry. Use the most authoritative URL (official blog > research > media > newsletter).
 
-Return ONLY a valid JSON array of the TOP 5 items by signal_score. No explanations. No markdown fences.`,
+Score EVERY item, don't pre-filter. Downstream code applies the signal threshold.
+Return a JSON array of EVERY item, sorted by signal_score DESC. No explanations. No markdown fences.`,
     messages: [
       {
         role: "user",
-        content: `Process this batch. Return top 5 as JSON array only:\n\n${articlesText}\n\nFormat: [{"url":"...","original_title":"...","signal_score":75,"merged_urls":["other url if merged"]}]`,
+        content: `Process this batch. Return ALL items sorted by signal_score DESC as JSON array only:\n\n${articlesText}\n\nFormat: [{"url":"...","original_title":"...","signal_score":75,"merged_urls":["other url if merged"]}]`,
       },
     ],
   })
