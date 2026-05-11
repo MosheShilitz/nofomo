@@ -10,6 +10,7 @@ import Parser from "rss-parser"
 import { supabaseAdmin } from "@/lib/supabase"
 import { getIngestionSources, PREPRINT_SOURCE_IDS } from "@/lib/sources"
 import { isQuietHours } from "@/lib/calendar"
+import { isAIRelated } from "@/lib/relevance"
 
 const parser = new Parser({
   customFields: {
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest) {
   }
 
   const sources = getIngestionSources()
-  const results = { fetched: 0, saved: 0, skipped: 0, errors: [] as string[] }
+  const results = { fetched: 0, saved: 0, skipped: 0, off_topic: 0, errors: [] as string[] }
 
   for (const source of sources) {
     if (!source.rss) continue
@@ -69,6 +70,12 @@ export async function POST(req: NextRequest) {
           item.summary ||
           item.contentSnippet ||
           ""
+
+        // סינון רלוונטיות — אם לא ב-AI, אל תכניס לתור
+        if (!isAIRelated(item.title, content)) {
+          results.off_topic++
+          continue
+        }
 
         // שמור raw article לתור עיבוד
         const { error } = await supabaseAdmin.from("raw_articles").insert({
