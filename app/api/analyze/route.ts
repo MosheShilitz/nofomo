@@ -11,11 +11,17 @@ import { analyzeBatch, extractStoryDetails } from "@/lib/claude"
 import { calcSignalScore, getSignalLabel } from "@/lib/signal"
 import { sendApprovalMessage } from "@/lib/telegram"
 import { getSourceById, isPreprint } from "@/lib/sources"
+import { isQuietHours } from "@/lib/calendar"
 
 export async function POST(req: NextRequest) {
   const auth = req.headers.get("authorization")
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  // שעות שקטות (23:00-06:00 IL)
+  if (isQuietHours()) {
+    return NextResponse.json({ skipped: "quiet_hours" })
   }
 
   // מצא עד 30 articles לא מעובדים מ-48 השעות האחרונות

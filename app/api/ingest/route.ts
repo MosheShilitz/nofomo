@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server"
 import Parser from "rss-parser"
 import { supabaseAdmin } from "@/lib/supabase"
 import { getIngestionSources, PREPRINT_SOURCE_IDS } from "@/lib/sources"
+import { isQuietHours } from "@/lib/calendar"
 
 const parser = new Parser({
   customFields: {
@@ -26,6 +27,11 @@ export async function POST(req: NextRequest) {
   const auth = req.headers.get("authorization")
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  // שעות שקטות (23:00-06:00 IL) — אין קוראים, אין סיבה לבזבז
+  if (isQuietHours()) {
+    return NextResponse.json({ skipped: "quiet_hours" })
   }
 
   const sources = getIngestionSources()

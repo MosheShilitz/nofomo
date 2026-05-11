@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull *)",
+      "Bash(ls -la \"C:/Users/moshes_combix/.claude/projects/\" 2>&1 | head -30)",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(32\\).toString\\('hex'\\)\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit -m 'security: remove hardcoded CRON_SECRET from docs *)",
+      "Bash(git commit -m 'perf: enable prompt caching on Stage 2 system prompt *)",
+      "Bash(npm install *)",
+      "Bash(git commit -m 'feat: validate Claude responses with Zod *)",
+      "Bash(npx tsc *)",
+      "Bash(git commit -m 'feat: skip ingest+analyze during quiet hours \\(23:00-06:00 IL\\) *)"
+    ]
+  }
+}
