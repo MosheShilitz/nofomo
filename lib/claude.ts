@@ -76,21 +76,9 @@ Return ONLY a valid JSON array of the TOP 5 items by signal_score. No explanatio
 
 // ─── Stage 2: Detail Extraction ───────────────────────────────────────────────
 // רץ על כל אחת מ-5 הידיעות הנבחרות — מחלץ תוכן מלא בעברית
+// System prompt cached (ephemeral) — חיסכון ~80% כשהקריאות חופפות ב-5 דקות
 
-export async function extractStoryDetails(
-  title: string,
-  content: string,
-  url: string,
-  mergedContent?: string
-): Promise<StoryDetails> {
-  const fullContent = mergedContent
-    ? `מקור ראשי:\n${content}\n\nהקשר נוסף ממקורות נוספים:\n${mergedContent}`
-    : content
-
-  const message = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 2048,
-    system: `אתה עורך טכני בכיר של NO-FOMO.AI. כותב לקהל של מפתחים ואנשי AI מקצועיים.
+const STAGE_2_SYSTEM = `אתה עורך טכני בכיר של NO-FOMO.AI. כותב לקהל של מפתחים ואנשי AI מקצועיים.
 
 חוק ברזל — Anti-Hype:
 אסור להשתמש ב: "מהפכני", "פורץ דרך", "עתיד ה-AI", "גיים צ'יינג'ר", "שינוי פרדיגמה", או כל מקבילה עברית.
@@ -116,7 +104,28 @@ impact_score: 1=שגרתי, 2=שווה לדעת, 3=חשוב, 4=מאוד חשוב
 who_affected: רק מתוך [developers, business, consumers, researchers, policymakers]
 category: רק מתוך [LLMs, tools, research, robotics, safety, policy, vision, audio, agents, open_source, business, hardware]
 
-החזר JSON בלבד.`,
+החזר JSON בלבד.`
+
+export async function extractStoryDetails(
+  title: string,
+  content: string,
+  url: string,
+  mergedContent?: string
+): Promise<StoryDetails> {
+  const fullContent = mergedContent
+    ? `מקור ראשי:\n${content}\n\nהקשר נוסף ממקורות נוספים:\n${mergedContent}`
+    : content
+
+  const message = await client.messages.create({
+    model: "claude-sonnet-4-6",
+    max_tokens: 2048,
+    system: [
+      {
+        type: "text",
+        text: STAGE_2_SYSTEM,
+        cache_control: { type: "ephemeral" },
+      },
+    ],
     messages: [
       {
         role: "user",
