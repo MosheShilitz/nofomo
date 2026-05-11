@@ -9,6 +9,18 @@ import { publishToChannel, answerCallback, editMessageText, sendMessage } from "
 import { getSourceById } from "@/lib/sources"
 
 export async function POST(req: NextRequest) {
+  // Telegram webhook signature — ה-secret_token מוגדר ב-setWebhook
+  // ונשלח בכל בקשה ב-header X-Telegram-Bot-Api-Secret-Token.
+  // מונע מתוקף לזייף לחיצות approve/reject.
+  const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET
+  if (!expectedSecret) {
+    return NextResponse.json({ error: "Webhook secret not configured" }, { status: 500 })
+  }
+  const providedSecret = req.headers.get("x-telegram-bot-api-secret-token")
+  if (providedSecret !== expectedSecret) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
   const body = await req.json()
 
   // טיפול ב-callback_query (לחיצה על כפתור)
