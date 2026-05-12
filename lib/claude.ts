@@ -195,10 +195,8 @@ export async function extractStoryDetails(
 
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
-    // 1200 covers a full Hebrew extraction (title + bottom_line + 200-300 word
-    // summary + arrays). 2048 was over-provisioned; trimming generation time is
-    // the main lever since Stage 2 dominates wall-clock.
-    max_tokens: 1200,
+    // 2048 — Hebrew encodes ~2x tokens/char vs English. 1200 truncated mid-JSON.
+    max_tokens: 2048,
     system: [
       {
         type: "text",
