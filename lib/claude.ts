@@ -96,7 +96,9 @@ export async function analyzeBatch(
     .join("\n\n---\n\n")
 
   const message = await client.messages.create({
-    model: "claude-sonnet-4-6",
+    // Haiku for triage: scoring + dedup is a classifier-shaped task. Sonnet is
+    // overkill and ~3-5x slower. Keep Sonnet for Stage 2 (full Hebrew extraction).
+    model: "claude-haiku-4-5-20251001",
     max_tokens: 1500,
     system: `You are the Senior Tech Editor for NO-FOMO.AI. Your ONLY job right now is TRIAGE.
 
@@ -193,7 +195,10 @@ export async function extractStoryDetails(
 
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
-    max_tokens: 2048,
+    // 1200 covers a full Hebrew extraction (title + bottom_line + 200-300 word
+    // summary + arrays). 2048 was over-provisioned; trimming generation time is
+    // the main lever since Stage 2 dominates wall-clock.
+    max_tokens: 1200,
     system: [
       {
         type: "text",
