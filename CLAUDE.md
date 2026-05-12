@@ -58,20 +58,21 @@ cron-job.org (כל שעה)
 
 ## הגדרות חשובות
 
-**Authorization:** כל API endpoint דורש `Authorization: Bearer CRON_SECRET`  
-**CRON_SECRET:** `nofomo-secret-2024`  
+**Authorization:** כל API endpoint דורש `Authorization: Bearer $CRON_SECRET`
+**CRON_SECRET:** מאוחסן ב-Vercel env vars + `.env.local` (לא במסמך הזה — אבטחה)
 **Telegram Webhook:** רשום ל-`https://nofomo-ai.vercel.app/api/approve`
 
-**לבדיקה מקומית:**
+**לבדיקה מקומית** (טען את `$CRON_SECRET` מ-`.env.local` תחילה):
 ```powershell
 # שרת
 npm run dev
 
 # ingest
-Invoke-WebRequest -Uri "http://localhost:3000/api/ingest" -Method POST -Headers @{"Authorization"="Bearer nofomo-secret-2024"} -UseBasicParsing | Select-Object -ExpandProperty Content
+$secret = (Get-Content .env.local | Select-String "CRON_SECRET=").Line.Split("=")[1]
+Invoke-WebRequest -Uri "http://localhost:3000/api/ingest" -Method POST -Headers @{"Authorization"="Bearer $secret"} -UseBasicParsing | Select-Object -ExpandProperty Content
 
 # analyze
-Invoke-WebRequest -Uri "http://localhost:3000/api/analyze" -Method POST -Headers @{"Authorization"="Bearer nofomo-secret-2024"} -UseBasicParsing | Select-Object -ExpandProperty Content
+Invoke-WebRequest -Uri "http://localhost:3000/api/analyze" -Method POST -Headers @{"Authorization"="Bearer $secret"} -UseBasicParsing | Select-Object -ExpandProperty Content
 ```
 
 ---

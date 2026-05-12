@@ -7,8 +7,21 @@ import { NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase"
 import { publishToChannel, answerCallback, editMessageText, sendMessage } from "@/lib/telegram"
 import { getSourceById } from "@/lib/sources"
+import { isShabbatOrHoliday } from "@/lib/calendar"
 
 export async function POST(req: NextRequest) {
+  // Telegram webhook signature — ה-secret_token מוגדר ב-setWebhook
+  // ונשלח בכל בקשה ב-header X-Telegram-Bot-Api-Secret-Token.
+  // מונע מתוקף לזייף לחיצות approve/reject.
+  const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET
+  if (!expectedSecret) {
+    return NextResponse.json({ error: "Webhook secret not configured" }, { status: 500 })
+  }
+  const providedSecret = req.headers.get("x-telegram-bot-api-secret-token")
+  if (providedSecret !== expectedSecret) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
   const body = await req.json()
 
   // טיפול ב-callback_query (לחיצה על כפתור)
@@ -54,6 +67,27 @@ async function handleApprove(articleId: string, callbackId: string, messageId?: 
   }
 
   const source = getSourceById(article.source_id)
+
+  // שבת/חג — שמור כ-approved אבל בלי לפרסם. P1 יוסיף cron שיוציא את ה-pending במוצ"ש.
+  if (isShabbatOrHoliday()) {
+    await supabaseAdmin
+      .from("articles")
+      .update({ approval_status: "approved_pending_shabbat", approved_at: new Date().toISOString() })
+      .eq("id", articleId)
+    await supabaseAdmin
+      .from("approval_queue")
+      .update({ status: "approved_pending_shabbat", decided_at: new Date().toISOString() })
+      .eq("article_id", articleId)
+    await answerCallback(callbackId, "💾 נשמר — יפורסם אחרי שבת")
+    if (messageId) {
+      await editMessageText(
+        process.env.TELEGRAM_OWNER_CHAT_ID!,
+        messageId,
+        `💾 <b>ממתין למוצ"ש</b>\n${article.title_he}`
+      )
+    }
+    return
+  }
 
   // פרסם לערוץ
   await publishToChannel({
