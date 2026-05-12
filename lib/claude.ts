@@ -195,8 +195,10 @@ export async function extractStoryDetails(
 
   const message = await client.messages.create({
     model: "claude-sonnet-4-6",
-    // 2048 — Hebrew encodes ~2x tokens/char vs English. 1200 truncated mid-JSON.
-    max_tokens: 2048,
+    // 3500 — Hebrew + JSON overhead routinely lands ~2500 tokens for a full
+    // extraction (12 fields, 200-300 word summary). 2048 truncated mid-JSON
+    // on dense research content. Headroom > truncation cost.
+    max_tokens: 3500,
     system: [
       {
         type: "text",
