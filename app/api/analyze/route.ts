@@ -135,35 +135,78 @@ async function handlePost(req: NextRequest) {
 
   // ─── שמור ל-DB ו-Telegram ─────────────────────────────────────────────────
 
-  // שמור את ה-picks (fulfilled)
-  for (const settled of detailResults) {
-    if (settled.status === "rejected") {
-      results.errors.push(`extractStoryDetails failed: ${String(settled.reason)}`)
-      continue
-    }
+  // Persist + notify in parallel across picks. Sequential before this change
+  // meant 4 picks × ~3-5s each (DB + Telegram) ≈ 15-20s. Within a single pick the
+  // ordering still matters: article insert → telegram → approval_queue insert.
+  await Promise.allSettled(
+    detailResults.map(async (settled) => {
+      if (settled.status === "rejected") {
+        results.errors.push(`extractStoryDetails failed: ${String(settled.reason)}`)
+        return
+      }
 
-    const { batchResult, raw, source, details } = settled.value
+      const { batchResult, raw, source, details } = settled.value
 
-    const signalScore = calcSignalScore({
-      sourceCount: 1 + (batchResult.merged_urls?.length ?? 0),
-      isFirstTier1: source?.tier === 1,
-      socialScore: 0,
-      expertReactions: 0,
-      velocityMinutes: 999,
-      impactScore: details.impact_score,
-    })
-    const signalLabel = getSignalLabel(signalScore)
+      const signalScore = calcSignalScore({
+        sourceCount: 1 + (batchResult.merged_urls?.length ?? 0),
+        isFirstTier1: source?.tier === 1,
+        socialScore: 0,
+        expertReactions: 0,
+        velocityMinutes: 999,
+        impactScore: details.impact_score,
+      })
+      const signalLabel = getSignalLabel(signalScore)
 
-    try {
-      const { data: article, error: insertError } = await supabaseAdmin
-        .from("articles")
-        .insert({
-          source_id: raw.source_id,
-          original_url: raw.original_url,
-          title_en: raw.title_en,
+      try {
+        const { data: article, error: insertError } = await supabaseAdmin
+          .from("articles")
+          .insert({
+            source_id: raw.source_id,
+            original_url: raw.original_url,
+            title_en: raw.title_en,
+            title_he: details.title_he,
+            bottom_line: details.bottom_line,
+            summary_he: details.summary_he,
+            what_happened: details.what_happened,
+            why_matters: details.why_matters,
+            the_problem: details.the_problem,
+            the_solution: details.the_solution,
+            who_affected: details.who_affected,
+            use_cases: details.use_cases,
+            impact_score: details.impact_score,
+            signal_score: signalScore,
+            signal_label: signalLabel,
+            category: details.category,
+            published_at: raw.published_at,
+            approval_status: "pending",
+          })
+          .select()
+          .single()
+
+        if (insertError || !article) {
+          results.errors.push(`insert topPicks: ${insertError?.message}`)
+          return
+        }
+
+        // Bulk-update raw_articles in one query: the pick itself + any merged URLs.
+        const processedIds = [
+          raw.id,
+          ...(batchResult.merged_urls ?? [])
+            .map((u) => urlToRaw.get(u)?.id)
+            .filter((id): id is number => id !== undefined),
+        ]
+        await supabaseAdmin
+          .from("raw_articles")
+          .update({ processed: true })
+          .in("id", processedIds)
+
+        results.processed++
+
+        const msgId = await sendApprovalMessage({
+          is_preprint: isPreprint(raw.source_id),
+          id: article.id,
           title_he: details.title_he,
           bottom_line: details.bottom_line,
-          summary_he: details.summary_he,
           what_happened: details.what_happened,
           why_matters: details.why_matters,
           the_problem: details.the_problem,
@@ -174,98 +217,57 @@ async function handlePost(req: NextRequest) {
           signal_score: signalScore,
           signal_label: signalLabel,
           category: details.category,
-          published_at: raw.published_at,
-          approval_status: "pending",
-        })
-        .select()
-        .single()
-
-      if (insertError || !article) {
-        results.errors.push(`insert topPicks: ${insertError?.message}`)
-        continue
-      }
-
-      await supabaseAdmin.from("raw_articles").update({ processed: true }).eq("id", raw.id)
-
-      // Mark merged sources as processed too
-      if (batchResult.merged_urls) {
-        for (const mergedUrl of batchResult.merged_urls) {
-          const mergedRaw = urlToRaw.get(mergedUrl)
-          if (mergedRaw) {
-            await supabaseAdmin.from("raw_articles").update({ processed: true }).eq("id", mergedRaw.id)
-          }
-        }
-      }
-
-      results.processed++
-
-      // שלח לאישור בטלגרם
-      const msgId = await sendApprovalMessage({
-        is_preprint: isPreprint(raw.source_id),
-        id: article.id,
-        title_he: details.title_he,
-        bottom_line: details.bottom_line,
-        what_happened: details.what_happened,
-        why_matters: details.why_matters,
-        the_problem: details.the_problem,
-        the_solution: details.the_solution,
-        who_affected: details.who_affected,
-        use_cases: details.use_cases,
-        impact_score: details.impact_score,
-        signal_score: signalScore,
-        signal_label: signalLabel,
-        category: details.category,
-        original_url: raw.original_url,
-        published_at: raw.published_at,
-        source_display_name: source?.credit.display_name ?? raw.source_id,
-        cross_refs_count: batchResult.merged_urls?.length ?? 0,
-        first_source: source?.credit.display_name,
-      })
-
-      await supabaseAdmin.from("approval_queue").insert({
-        article_id: article.id,
-        status: "pending",
-        telegram_message_id: msgId ?? null,
-        sent_at: new Date().toISOString(),
-      })
-
-      results.sent_to_approval++
-    } catch (err) {
-      results.errors.push(`article ${raw.id}: ${String(err)}`)
-      await supabaseAdmin.from("raw_articles").update({ processed: true }).eq("id", raw.id)
-    }
-  }
-
-  // סמן את כל השאר כ-skipped (לא עברו את ה-triage)
-  const skippedRaws = rawArticles.filter((a) => !topUrls.has(a.original_url))
-  for (const raw of skippedRaws) {
-    try {
-      await supabaseAdmin
-        .from("articles")
-        .insert({
-          source_id: raw.source_id,
           original_url: raw.original_url,
-          title_en: raw.title_en,
-          title_he: raw.title_en, // no Hebrew — skipped before extraction
-          summary_he: "",
-          what_happened: "",
-          why_matters: "",
-          who_affected: [],
-          use_cases: [],
-          impact_score: 1,
-          signal_score: 0,
-          signal_label: "normal",
-          category: "tools",
           published_at: raw.published_at,
-          approval_status: "skipped",
+          source_display_name: source?.credit.display_name ?? raw.source_id,
+          cross_refs_count: batchResult.merged_urls?.length ?? 0,
+          first_source: source?.credit.display_name,
         })
-        .select()
-        .single()
 
-      await supabaseAdmin.from("raw_articles").update({ processed: true }).eq("id", raw.id)
-    } catch {
-      // Silently skip — DB insert failures for skipped items are not critical
-    }
+        await supabaseAdmin.from("approval_queue").insert({
+          article_id: article.id,
+          status: "pending",
+          telegram_message_id: msgId ?? null,
+          sent_at: new Date().toISOString(),
+        })
+
+        results.sent_to_approval++
+      } catch (err) {
+        results.errors.push(`article ${raw.id}: ${String(err)}`)
+        await supabaseAdmin.from("raw_articles").update({ processed: true }).eq("id", raw.id)
+      }
+    })
+  )
+
+  // סמן את כל השאר כ-skipped (לא עברו את ה-triage).
+  // Bulk insert + bulk update — one round-trip each instead of 2×N. With ~11
+  // skipped per run and ~100ms latency to Supabase, this saves ~2s per run.
+  const skippedRaws = rawArticles.filter((a) => !topUrls.has(a.original_url))
+  if (skippedRaws.length > 0) {
+    const skippedRows = skippedRaws.map((raw) => ({
+      source_id: raw.source_id,
+      original_url: raw.original_url,
+      title_en: raw.title_en,
+      title_he: raw.title_en,
+      summary_he: "",
+      what_happened: "",
+      why_matters: "",
+      who_affected: [],
+      use_cases: [],
+      impact_score: 1,
+      signal_score: 0,
+      signal_label: "normal",
+      category: "tools",
+      published_at: raw.published_at,
+      approval_status: "skipped",
+    }))
+    await Promise.allSettled([
+      supabaseAdmin.from("articles").insert(skippedRows),
+      supabaseAdmin
+        .from("raw_articles")
+        .update({ processed: true })
+        .in("id", skippedRaws.map((r) => r.id)),
+    ])
   }
 
   return NextResponse.json(results)
