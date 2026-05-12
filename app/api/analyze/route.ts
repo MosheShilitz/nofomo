@@ -14,6 +14,21 @@ import { getSourceById, isPreprint } from "@/lib/sources"
 import { isQuietHours } from "@/lib/calendar"
 
 export async function POST(req: NextRequest) {
+  try {
+    return await handlePost(req)
+  } catch (err) {
+    // Last-resort guard so 500s always carry a diagnostic body instead of opaque
+    // "Internal Server Error". Without this, exceptions thrown before the route's
+    // own try blocks (e.g. Supabase network failure) surface as bodyless 500s.
+    const stack = err instanceof Error ? err.stack : undefined
+    return NextResponse.json(
+      { error: String(err), stack: stack?.split("\n").slice(0, 5).join("\n") },
+      { status: 500 }
+    )
+  }
+}
+
+async function handlePost(req: NextRequest) {
   const auth = req.headers.get("authorization")
   if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
