@@ -36,7 +36,9 @@ export async function POST(req: NextRequest) {
   }
 
   const sources = getIngestionSources()
-  const results = { fetched: 0, saved: 0, skipped: 0, off_topic: 0, errors: [] as string[] }
+  // dead_feeds: מקורות שה-fetch/parse שלהם נכשל — מופרד מ-errors (שמכיל גם כשלי DB).
+  // נוסף 31/07/2026 אחרי שבדיקה ידנית גילתה ש-24 מתוך 71 הפידים מתים בלי שאיש ידע.
+  const results = { fetched: 0, saved: 0, skipped: 0, off_topic: 0, errors: [] as string[], dead_feeds: [] as string[] }
 
   // Process each source in parallel. Without this, ingest is O(sources × feed_latency)
   // which easily exceeds cron-job.org's 30s timeout. With Promise.allSettled it's
@@ -54,7 +56,11 @@ export async function POST(req: NextRequest) {
           : 10
 
         const items = feed.items.slice(0, itemLimit).filter((i) => i.link && i.title)
-        if (items.length === 0) return
+        if (items.length === 0) {
+          // פיד שנפרס אך חזר ריק — סימן מובהק לפיד שהתיישן (redirect לדף HTML, ארכיון שהוקפא).
+          results.dead_feeds.push(`${source.id}: parsed but empty`)
+          return
+        }
 
         // Batch dedup: one query for the whole feed instead of N point lookups.
         const urls = items.map((i) => i.link as string)
@@ -101,7 +107,10 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (err) {
-        results.errors.push(`${source.id}: ${String(err)}`)
+        // כשל fetch/parse של הפיד עצמו — לא כשל DB. מדווח בנפרד כדי שפיד מת יהיה גלוי בתשובה.
+        const msg = String(err).replace(/^Error:\s*/, "").slice(0, 120)
+        results.dead_feeds.push(`${source.id}: ${msg}`)
+        console.warn(`[ingest] dead feed ${source.id} (${source.rss}): ${msg}`)
       }
     })
   )

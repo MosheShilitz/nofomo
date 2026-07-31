@@ -201,8 +201,9 @@ export const SOURCES: Source[] = [
   {
     id: "microsoft-ai-blog",
     name: "Microsoft AI Blog",
-    url: "https://blogs.microsoft.com/ai",
-    rss: "https://blogs.microsoft.com/ai/feed",
+    url: "https://news.microsoft.com/source/topics/ai/",
+    // תוקן 31/07/2026: blogs.microsoft.com/ai/feed מחזיר 410 Gone. הפיד עבר ל-news.microsoft.com (אומת: 10 פריטים).
+    rss: "https://news.microsoft.com/source/topics/ai/feed/",
     type: "company_blog",
     tier: 1,
     lang: "en",
@@ -529,7 +530,8 @@ export const SOURCES: Source[] = [
     id: "apple-ml-research",
     name: "Apple ML Research",
     url: "https://machinelearning.apple.com",
-    rss: "https://machinelearning.apple.com/rss/articles.rss",
+    // תוקן 31/07/2026: /rss/articles.rss מחזיר 404. הנתיב הנכון הוא /rss.xml (אומת: 10 פריטים).
+    rss: "https://machinelearning.apple.com/rss.xml",
     type: "company_blog",
     tier: 2,
     lang: "en",
@@ -1150,7 +1152,8 @@ export const SOURCES: Source[] = [
     id: "simon-willison",
     name: "Simon Willison's Weblog",
     url: "https://simonwillison.net",
-    rss: "https://simonwillison.net/atom/everything",
+    // תוקן 31/07/2026: בלי הלוכסן הסוגר הבקשה נתקעת. עם לוכסן — אומת: 30 פריטים.
+    rss: "https://simonwillison.net/atom/everything/",
     type: "newsletter",
     tier: 2,
     lang: "en",
@@ -2114,7 +2117,8 @@ export const SOURCES: Source[] = [
     id: "eleutherai",
     name: "EleutherAI Blog",
     url: "https://blog.eleuther.ai",
-    rss: "https://blog.eleuther.ai/rss.xml",
+    // תוקן 31/07/2026: rss.xml מחזיר 404; האתר (Hugo) מגיש index.xml (אומת: 51 פריטים).
+    rss: "https://blog.eleuther.ai/index.xml",
     type: "research_org",
     tier: 2,
     lang: "en",
