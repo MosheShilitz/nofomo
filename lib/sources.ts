@@ -84,7 +84,10 @@ export const SOURCES: Source[] = [
     id: "anthropic-blog",
     name: "Anthropic Blog",
     url: "https://www.anthropic.com/news",
-    // אין RSS רשמי — מכוסה ע"י VentureBeat/TechCrunch
+    // אין RSS רשמי. נפתר 31/07/2026 ע"י Google News עם `site:` — הפיד מחזיר את הפוסטים
+    // מהדומיין של החברה עצמה, לא סיקור של אחרים (אומת: כל הכותרות מסתיימות ב-"- Anthropic").
+    // ⚠ שני סייגים: הלינק הוא הפניית news.google.com (לא URL ישיר), והכותרת נושאת סיומת " - <מקור>".
+    rss: "https://news.google.com/rss/search?q=site:anthropic.com+when:30d&hl=en-US&gl=US&ceid=US:en",
     type: "company_blog",
     tier: 1,
     lang: "en",
@@ -164,7 +167,9 @@ export const SOURCES: Source[] = [
     id: "mistral-blog",
     name: "Mistral AI Blog",
     url: "https://mistral.ai/news",
-    // אין RSS רשמי — מכוסה ע"י מדיה
+    // אין RSS רשמי — נפתר 31/07/2026 דרך Google News עם `site:mistral.ai/news`.
+    // הנתיב /news קריטי: `site:mistral.ai` לבדו מחזיר דפי docs ו-Login, לא חדשות.
+    rss: "https://news.google.com/rss/search?q=site:mistral.ai/news+when:30d&hl=en-US&gl=US&ceid=US:en",
     type: "company_blog",
     tier: 1,
     lang: "en",
@@ -239,8 +244,10 @@ export const SOURCES: Source[] = [
   {
     id: "xai-blog",
     name: "xAI Blog",
-    url: "https://x.ai/blog",
-    // אין RSS — 404
+    url: "https://x.ai/news",
+    // אין RSS — נפתר 31/07/2026 דרך Google News עם `site:x.ai/news`.
+    // גם כאן הנתיב חובה: `site:x.ai` לבדו מחזיר דפי Docs.
+    rss: "https://news.google.com/rss/search?q=site:x.ai/news+when:30d&hl=en-US&gl=US&ceid=US:en",
     type: "company_blog",
     tier: 1,
     lang: "en",
@@ -258,7 +265,8 @@ export const SOURCES: Source[] = [
     id: "cohere-blog",
     name: "Cohere Blog",
     url: "https://cohere.com/blog",
-    // לא RSS סטנדרטי — ללא feed
+    // אין feed סטנדרטי — נפתר 31/07/2026 דרך Google News עם `site:cohere.com` (אומת: פוסטים מהאתר עצמו).
+    rss: "https://news.google.com/rss/search?q=site:cohere.com+when:30d&hl=en-US&gl=US&ceid=US:en",
     type: "company_blog",
     tier: 1,
     lang: "en",

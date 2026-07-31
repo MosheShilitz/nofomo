@@ -23,6 +23,13 @@ const parser = new Parser({
   timeout: 10000,
 })
 
+// פידים של Google News (משמשים לחברות שאין להן RSS רשמי — Anthropic/Mistral/xAI/Cohere)
+// מוסיפים לכל כותרת סיומת " - <שם המקור>". בלי ניקוי היא זולגת לכותרת שמוצגת בערוץ.
+function cleanTitle(raw: string, feedUrl?: string): string {
+  if (!feedUrl?.includes("news.google.com")) return raw
+  return raw.replace(/\s+-\s+[^-]{2,40}$/, "").trim() || raw
+}
+
 export async function POST(req: NextRequest) {
   // בדוק authorization
   const auth = req.headers.get("authorization")
@@ -85,8 +92,10 @@ export async function POST(req: NextRequest) {
             item.contentSnippet ||
             ""
 
+          const title = cleanTitle(item.title as string, source.rss)
+
           // סינון רלוונטיות — אם לא ב-AI, אל תכניס לתור
-          if (!isAIRelated(item.title as string, content)) {
+          if (!isAIRelated(title, content)) {
             results.off_topic++
             continue
           }
@@ -94,7 +103,7 @@ export async function POST(req: NextRequest) {
           const { error } = await supabaseAdmin.from("raw_articles").insert({
             source_id: source.id,
             original_url: item.link,
-            title_en: item.title,
+            title_en: title,
             content_raw: content.slice(0, 5000),
             published_at: item.pubDate ? new Date(item.pubDate).toISOString() : new Date().toISOString(),
             processed: false,
